@@ -1,1 +1,1 @@
-openjdk:21-rocky
+openjdk 21-rocky
