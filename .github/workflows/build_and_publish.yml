@@ -1,0 +1,73 @@
+name: Build and Push Docker Images with Custom Tags
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - '**/Dockerfile'
+      - '**/docker/**'
+      - '**/image-info.txt'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get changed directories
+        id: changed-dirs
+        run: |
+          changed_files=$(git diff --name-only HEAD^ HEAD)
+          
+          dirs=()
+          for file in $changed_files; do
+            if [[ "$file" == *Dockerfile* ]] || [[ "$file" == docker/* ]] || [[ "$file" == */image-info.txt ]]; then
+              dir=$(dirname "$file")
+              if [[ ! " ${dirs[@]} " =~ " ${dir} " ]]; then
+                dirs+=("$dir")
+              fi
+            fi
+          done
+          
+          echo "dirs=${dirs[@]}" >> $GITHUB_OUTPUT
+          echo "Changed directories: ${dirs[@]}"
+
+      - name: Login to Docker Hub
+        if: steps.changed-dirs.outputs.dirs != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Build and push Docker images
+        if: steps.changed-dirs.outputs.dirs != ''
+        run: |
+          IFS=' ' read -ra dir_array <<< "${{ steps.changed-dirs.outputs.dirs }}"
+          
+          for dir in "${dir_array[@]}"; do
+            if [ -f "$dir/Dockerfile" ] && [ -f "$dir/image-info.txt" ]; then
+              # Read image name and tag from file
+              image_info=$(cat "$dir/image-info.txt")
+              image_name=$(echo "$image_info" | awk '{print $1}')
+              image_tag=$(echo "$image_info" | awk '{print $2}')
+              
+              if [ -z "$image_name" ] || [ -z "$image_tag" ]; then
+                echo "Error: Invalid image-info.txt format in $dir"
+                exit 1
+              fi
+              
+              echo "Building $image_name:$image_tag from $dir/Dockerfile"
+              
+              docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/$image_name:$image_tag $dir
+              docker push ${{ secrets.DOCKER_HUB_USERNAME }}/$image_name:$image_tag
+              
+              # Also tag as latest if it's the main version
+              if [[ "$image_tag" == "1.0"* ]] || [[ "$image_tag" == "latest"* ]]; then
+                docker tag ${{ secrets.DOCKER_HUB_USERNAME }}/$image_name:$image_tag ${{ secrets.DOCKER_HUB_USERNAME }}/$image_name:latest
+                docker push ${{ secrets.DOCKER_HUB_USERNAME }}/$image_name:latest
+              fi
+            fi
+          done
