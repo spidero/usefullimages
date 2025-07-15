@@ -1,4 +1,4 @@
-FROM rockylinux/rockylinux:10-minimal
+FROM rockylinux/rockylinux:9-minimal
 
 WORKDIR /tmp
 
